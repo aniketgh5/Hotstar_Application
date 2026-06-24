@@ -1,0 +1,47 @@
+pipeline {
+    agent any
+
+    tools {
+        maven "maven"
+    }
+
+    stages {
+
+        stage('Git Checkout') {
+            steps {
+                git branch: 'main', url: 'https://github.com/aniketgh5/Hotstar_Application.git'
+            }
+        }
+
+        stage('Compilation') {
+            steps {
+                sh 'mvn compile'
+            }
+        }
+
+        stage('Testing') {
+            steps {
+                sh 'mvn test'
+            }
+        }
+
+        stage('Build') {
+            steps {
+                sh 'mvn package'
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                withMaven(
+                    globalMavenSettingsConfig: 'settings.xml',
+                    jdk: 'jdk21',
+                    maven: 'maven',
+                    traceability: true
+                ) {
+                    sh 'mvn deploy'
+                }
+            }
+        }
+    }
+}
