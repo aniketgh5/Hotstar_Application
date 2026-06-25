@@ -1,4 +1,4 @@
-name: Build and Deploy to Nexus
+name: Java CI/CD with Nexus and Tomcat
 
 on:
   push:
@@ -6,13 +6,13 @@ on:
       - main
 
 jobs:
-  build:
+  build-deploy:
 
     runs-on: ubuntu-latest
 
     steps:
 
-      - name: Checkout Source
+      - name: Checkout Source Code
         uses: actions/checkout@v4
 
       - name: Setup Java 21
@@ -27,7 +27,11 @@ jobs:
           mkdir -p ~/.m2
 
           cat > ~/.m2/settings.xml <<EOF
-          <settings>
+          <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+                    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                    xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0
+                                        https://maven.apache.org/xsd/settings-1.0.0.xsd">
+
             <servers>
 
               <server>
@@ -43,17 +47,53 @@ jobs:
               </server>
 
             </servers>
+
           </settings>
           EOF
 
       - name: Compile
         run: mvn clean compile
 
-      - name: Test
+      - name: Run Unit Tests
         run: mvn test
 
-      - name: Package
+      - name: Package Application
         run: mvn package
 
-      - name: Deploy to Nexus
+      - name: Deploy Artifact to Nexus
         run: mvn deploy
+
+      - name: Deploy to Tomcat Server
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USERNAME }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          script: |
+
+            echo "Stopping Tomcat..."
+
+            sudo systemctl stop tomcat || true
+
+            echo "Removing old application..."
+
+            sudo rm -rf /opt/tomcat/webapps/myapp
+            sudo rm -f /opt/tomcat/webapps/myapp.war
+
+            echo "Downloading artifact from Nexus..."
+
+            curl -u "${{ secrets.NEXUS_USERNAME }}:${{ secrets.NEXUS_PASSWORD }}" \
+              -o /opt/tomcat/webapps/myapp.war \
+              "http://localhost:8081/repository/maven-releases/in/aniket/myapp/8.3.3/myapp-8.3.3.war"
+
+            echo "Starting Tomcat..."
+
+            sudo systemctl start tomcat
+
+            echo "Waiting for application..."
+
+            sleep 20
+
+            echo "Application Health Check"
+
+            curl -I http://localhost:8080/myapp
