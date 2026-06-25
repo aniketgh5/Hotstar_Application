@@ -63,7 +63,7 @@ jobs:
       - name: Deploy Artifact to Nexus
         run: mvn deploy
 
-      - name: Deploy to Tomcat Server
+      - name: Deploy Latest Snapshot to Tomcat
         uses: appleboy/ssh-action@v1.2.2
         with:
           host: ${{ secrets.VM_HOST }}
@@ -71,29 +71,69 @@ jobs:
           key: ${{ secrets.VM_SSH_KEY }}
           script: |
 
-            echo "Stopping Tomcat..."
+            set -e
 
-            sudo systemctl stop tomcat || true
+            echo "=============================="
+            echo "Stopping Tomcat"
+            echo "=============================="
 
-            echo "Removing old application..."
+            sudo systemctl stop tomcat10
 
-            sudo rm -rf /opt/tomcat/webapps/myapp
-            sudo rm -f /opt/tomcat/webapps/myapp.war
+            echo "=============================="
+            echo "Cleaning old deployment"
+            echo "=============================="
 
-            echo "Downloading artifact from Nexus..."
+            sudo rm -rf /var/lib/tomcat10/webapps/myapp
+            sudo rm -f /var/lib/tomcat10/webapps/myapp.war
 
-            curl -u "${{ secrets.NEXUS_USERNAME }}:${{ secrets.NEXUS_PASSWORD }}" \
-              -o /opt/tomcat/webapps/myapp.war \
-              "http://localhost:8081/repository/maven-releases/in/aniket/myapp/8.3.3/myapp-8.3.3.war"
+            echo "=============================="
+            echo "Finding latest Snapshot"
+            echo "=============================="
 
-            echo "Starting Tomcat..."
+            DOWNLOAD_URL=$(curl -s \
+              -u "${{ secrets.NEXUS_USERNAME }}:${{ secrets.NEXUS_PASSWORD }}" \
+              "http://localhost:8081/service/rest/v1/search?repository=maven-snapshots&group=in.aniket&name=myapp" \
+              | jq -r '
+                  .items
+                  | sort_by(.version)
+                  | last
+                  | .assets[]
+                  | select(.downloadUrl | endswith(".war"))
+                  | .downloadUrl
+              ')
 
-            sudo systemctl start tomcat
+            echo "Latest Artifact:"
+            echo "$DOWNLOAD_URL"
 
-            echo "Waiting for application..."
+            echo "=============================="
+            echo "Downloading WAR"
+            echo "=============================="
+
+            curl -L \
+              -u "${{ secrets.NEXUS_USERNAME }}:${{ secrets.NEXUS_PASSWORD }}" \
+              -o /tmp/myapp.war \
+              "$DOWNLOAD_URL"
+
+            sudo mv /tmp/myapp.war /var/lib/tomcat10/webapps/myapp.war
+
+            echo "=============================="
+            echo "Starting Tomcat"
+            echo "=============================="
+
+            sudo systemctl start tomcat10
+
+            echo "Waiting for deployment..."
 
             sleep 20
 
-            echo "Application Health Check"
+            echo "=============================="
+            echo "Deployment Status"
+            echo "=============================="
+
+            ls -l /var/lib/tomcat10/webapps/
+
+            echo "=============================="
+            echo "Health Check"
+            echo "=============================="
 
             curl -I http://localhost:8080/myapp
